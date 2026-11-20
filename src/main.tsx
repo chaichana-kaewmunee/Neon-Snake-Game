@@ -6,17 +6,16 @@ import { useGameLoop } from './ui/hooks/useGameLoop';
 import type { Direction } from './types';
 import { AudioSystem } from './systems/AudioSystem';
 import { PersistenceManager } from './systems/Persistence';
-import type { UserProfile } from './types/progression';
 
 const GameApp = () => {
   const engine = useRef(new Engine()).current;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<CanvasRenderer | null>(null);
   const audioRef = useRef(new AudioSystem()).current;
-  const [status, setStatus] = useState(engine.getState().status);
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState(PersistenceManager.loadProfile().settings);
 
+  // Single source of truth from game loop
   const state = useGameLoop(engine);
 
   useEffect(() => {
@@ -32,54 +31,72 @@ const GameApp = () => {
     }
   }, [state]);
 
+  const handleRestart = () => {
+    engine.reset();
+    engine.setStatus('PLAYING');
+  };
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Pause Toggle
+      if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+        if (state.status === 'PLAYING') {
+          engine.pause();
+        } else if (state.status === 'PAUSED') {
+          engine.resume();
+        }
+        return;
+      }
+
+      // Quick restart on Game Over
+      if (state.status === 'GAMEOVER' || state.status === 'GAME_OVER') {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'r' || e.key === 'R') {
+          handleRestart();
+          return;
+        }
+      }
+
       const keyMap: Record<string, Direction> = {
-        ArrowUp: 'UP', w: 'UP',
-        ArrowDown: 'DOWN', s: 'DOWN',
-        ArrowLeft: 'LEFT', a: 'LEFT',
-        ArrowRight: 'RIGHT', d: 'RIGHT',
+        ArrowUp: 'UP', w: 'UP', W: 'UP',
+        ArrowDown: 'DOWN', s: 'DOWN', S: 'DOWN',
+        ArrowLeft: 'LEFT', a: 'LEFT', A: 'LEFT',
+        ArrowRight: 'RIGHT', d: 'RIGHT', D: 'RIGHT',
       };
+
       const dir = keyMap[e.key];
       if (dir) {
-        // Resume audio context on first interaction
         audioRef.resumeContext();
         engine.handleInput(dir);
-        if (status === 'IDLE') {
+        if (state.status === 'IDLE' || state.status === 'READY') {
           engine.setStatus('PLAYING');
-          setStatus('PLAYING');
-          audioRef.playMusic('/sounds/bgm.mp3');
         }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [status]);
+  }, [state.status]);
 
   // Handle Touch Inputs
   const handleTouch = (dir: Direction) => {
     audioRef.resumeContext();
     engine.handleInput(dir);
-    if (status === 'IDLE') {
+    if (state.status === 'IDLE' || state.status === 'READY') {
       engine.setStatus('PLAYING');
-      setStatus('PLAYING');
-      audioRef.playMusic('/sounds/bgm.mp3');
     }
   };
 
-  const handleRestart = () => {
-    engine.reset();
-    engine.setStatus('PLAYING');
-    setStatus('PLAYING');
-  };
-
-  const saveSettings = (newSettings: any) => {
+  const saveSettings = (newSettings: typeof settings) => {
     const profile = PersistenceManager.loadProfile();
     PersistenceManager.saveProfile({ ...profile, settings: newSettings });
     setSettings(newSettings);
     audioRef.updateVolume();
   };
+
+  const isGameOver = state.status === 'GAMEOVER' || state.status === 'GAME_OVER';
+  const isIdle = state.status === 'IDLE' || state.status === 'READY';
+  const isPaused = state.status === 'PAUSED';
+  const isVictory = state.status === 'VICTORY';
 
   return (
     <div style={styles.container}>
@@ -92,24 +109,40 @@ const GameApp = () => {
       <div style={styles.gameWrapper}>
         <canvas ref={canvasRef} style={styles.canvas} />
 
-        {status === 'IDLE' && (
+        {isIdle && (
           <div style={styles.overlay}>
             <h2 style={styles.overlayText}>PRESS ANY KEY TO START</h2>
             <div style={styles.touchControls}>
-                <button onClick={() => handleTouch('UP')} style={styles.touchBtn}>▲</button>
-                <div style={styles.touchRow}>
-                    <button onClick={() => handleTouch('LEFT')} style={styles.touchBtn}>◀</button>
-                    <button onClick={() => handleTouch('DOWN')} style={styles.touchBtn}>▼</button>
-                    <button onClick={() => handleTouch('RIGHT')} style={styles.touchBtn}>▶</button>
-                </div>
+              <button onClick={() => handleTouch('UP')} style={styles.touchBtn}>▲</button>
+              <div style={styles.touchRow}>
+                <button onClick={() => handleTouch('LEFT')} style={styles.touchBtn}>◀</button>
+                <button onClick={() => handleTouch('DOWN')} style={styles.touchBtn}>▼</button>
+                <button onClick={() => handleTouch('RIGHT')} style={styles.touchBtn}>▶</button>
+              </div>
             </div>
           </div>
         )}
 
-        {status === 'GAMEOVER' && (
+        {isPaused && (
           <div style={styles.overlay}>
-            <h2 style={styles.overlayText}>GAME OVER</h2>
+            <h2 style={styles.overlayText}>PAUSED</h2>
+            <button onClick={() => engine.resume()} style={styles.button}>RESUME</button>
+          </div>
+        )}
+
+        {isGameOver && (
+          <div style={styles.overlay}>
+            <h2 style={{ ...styles.overlayText, color: '#ff3131', textShadow: '0 0 10px #ff3131' }}>GAME OVER</h2>
+            <div style={{ fontSize: '1.4rem', marginBottom: '15px', color: '#fff' }}>FINAL SCORE: {state.score}</div>
             <button onClick={handleRestart} style={styles.button}>RESTART</button>
+          </div>
+        )}
+
+        {isVictory && (
+          <div style={styles.overlay}>
+            <h2 style={{ ...styles.overlayText, color: '#00f0ff', textShadow: '0 0 10px #00f0ff' }}>VICTORY!</h2>
+            <div style={{ fontSize: '1.4rem', marginBottom: '15px', color: '#fff' }}>BOARD COMPLETED! SCORE: {state.score}</div>
+            <button onClick={handleRestart} style={styles.button}>PLAY AGAIN</button>
           </div>
         )}
       </div>
@@ -123,7 +156,7 @@ const GameApp = () => {
               <input
                 type="range" min="0" max="1" step="0.1"
                 value={settings.volume}
-                onChange={(e) => saveSettings({...settings, volume: parseFloat(e.target.value)})}
+                onChange={(e) => saveSettings({ ...settings, volume: parseFloat(e.target.value) })}
               />
             </div>
             <div style={styles.settingItem}>
@@ -131,7 +164,7 @@ const GameApp = () => {
               <input
                 type="checkbox"
                 checked={settings.muted}
-                onChange={(e) => saveSettings({...settings, muted: e.target.checked})}
+                onChange={(e) => saveSettings({ ...settings, muted: e.target.checked })}
               />
             </div>
             <button onClick={() => setShowSettings(false)} style={styles.button}>CLOSE</button>
@@ -153,7 +186,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'center',
     fontFamily: 'monospace',
     overflow: 'hidden',
-    touchAction: 'none', // Prevents scrolling during gameplay
+    touchAction: 'none',
   },
   hud: {
     textAlign: 'center',
@@ -196,7 +229,7 @@ const styles: Record<string, React.CSSProperties> = {
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0,0,0,0.8)',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
@@ -207,10 +240,10 @@ const styles: Record<string, React.CSSProperties> = {
   overlayText: {
     fontSize: '2rem',
     textShadow: '0 0 10px #39ff14',
-    marginBottom: '20px',
+    marginBottom: '15px',
   },
   button: {
-    padding: '10px 20px',
+    padding: '10px 24px',
     fontSize: '1.2rem',
     backgroundColor: 'transparent',
     color: '#39ff14',
@@ -218,7 +251,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontFamily: 'monospace',
     transition: 'all 0.2s',
-    boxShadow: '0 0 5px #39ff14',
+    boxShadow: '0 0 8px #39ff14',
   },
   touchControls: {
     display: 'flex',
@@ -246,7 +279,7 @@ const styles: Record<string, React.CSSProperties> = {
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.8)',
+    backgroundColor: 'rgba(0,0,0,0.85)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',

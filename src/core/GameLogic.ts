@@ -1,49 +1,67 @@
-import type { Point, Direction, GameState, GameStatus } from '../types';
+import type { Point, Direction, GameState } from '../types';
 import { CONSTANTS } from '../types';
 import type { Food, FoodType } from '../types/gameplay';
+import { PRNG } from './PRNG';
 
 export class GameLogic {
   /**
    * Creates a fresh initial state.
    */
-  static createInitialState(): GameState {
+  static createInitialState(gridSize: number = CONSTANTS.GRID_SIZE): GameState {
+    const initialSnake: Point[] = [
+      { x: Math.floor(gridSize / 2), y: Math.floor(gridSize / 2) },
+      { x: Math.floor(gridSize / 2), y: Math.floor(gridSize / 2) + 1 },
+      { x: Math.floor(gridSize / 2), y: Math.floor(gridSize / 2) + 2 },
+    ];
+
     return {
-      snake: [...CONSTANTS.INITIAL_SNAKE],
-      food: this.generateFood(CONSTANTS.INITIAL_SNAKE, CONSTANTS.GRID_SIZE).position,
+      snake: initialSnake,
+      food: this.generateFood(initialSnake, gridSize).position,
       direction: CONSTANTS.INITIAL_DIRECTION,
       score: 0,
       status: 'IDLE',
-      gridSize: CONSTANTS.GRID_SIZE,
+      gridSize,
     };
   }
 
   /**
    * Generates food at a random position not occupied by the snake.
-   * Uses a seed-based random if provided for determinism.
+   * Uses deterministic PRNG if provided, with seed-based fallback.
    */
-  static generateFood(snake: Point[], gridSize: number, type: FoodType = 'NORMAL', seed?: number): Food {
+  static generateFood(
+    snake: Point[],
+    gridSize: number,
+    type: FoodType = 'NORMAL',
+    prngOrSeed?: PRNG | number
+  ): Food {
     const isOccupied = (p: Point) => snake.some(s => s.x === p.x && s.y === p.y);
 
-    let random = () => {
-      if (seed === undefined) return Math.random();
-      seed = (seed * 16807) % 2147483647;
-      return (seed - 1) / 2147483646;
-    };
+    let prng: PRNG;
+    if (prngOrSeed instanceof PRNG) {
+      prng = prngOrSeed;
+    } else if (typeof prngOrSeed === 'number') {
+      prng = new PRNG(prngOrSeed);
+    } else {
+      prng = new PRNG(Date.now());
+    }
 
-    let pos: Point;
-    let attempts = 0;
-    const maxAttempts = gridSize * gridSize;
-
-    do {
-      pos = {
-        x: Math.floor(random() * gridSize),
-        y: Math.floor(random() * gridSize),
-      };
-      attempts++;
-      if (attempts > maxAttempts) {
-        throw new Error('FULL_BOARD');
+    // Collect all unoccupied coordinates
+    const availablePoints: Point[] = [];
+    for (let x = 0; x < gridSize; x++) {
+      for (let y = 0; y < gridSize; y++) {
+        const candidate = { x, y };
+        if (!isOccupied(candidate)) {
+          availablePoints.push(candidate);
+        }
       }
-    } while (isOccupied(pos));
+    }
+
+    if (availablePoints.length === 0) {
+      throw new Error('FULL_BOARD');
+    }
+
+    const randomIndex = prng.nextInt(0, availablePoints.length - 1);
+    const pos = availablePoints[randomIndex]!;
 
     const food: Food = { position: pos, type };
 
@@ -98,11 +116,14 @@ export class GameLogic {
       if (food.type === 'BONUS') pointsAdded = 5;
       if (food.type === 'RARE') pointsAdded = 10;
 
+      const isVictory = newSnake.length >= state.gridSize * state.gridSize;
+
       return {
         ...state,
         snake: newSnake,
         score: state.score + pointsAdded,
         direction: nextDirection,
+        status: isVictory ? 'VICTORY' : state.status,
       };
     }
 
@@ -116,7 +137,7 @@ export class GameLogic {
   }
 
   /**
-   * Validates if a direction change is legal (not reversing).
+   * Validates if a direction change is legal (not reversing 180 degrees).
    */
   static isLegalDirection(current: Direction, next: Direction): boolean {
     const opposites: Record<Direction, Direction> = {

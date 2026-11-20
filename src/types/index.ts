@@ -2,7 +2,7 @@ export type Point = { x: number; y: number };
 
 export type Direction = 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
 
-export type GameStatus = 'IDLE' | 'PLAYING' | 'PAUSED' | 'GAMEOVER';
+export type GameStatus = 'IDLE' | 'READY' | 'PLAYING' | 'PAUSED' | 'GAMEOVER' | 'GAME_OVER' | 'VICTORY';
 
 export interface GameState {
   snake: Point[];
@@ -24,3 +24,10 @@ export const CONSTANTS: GameConstants = {
   INITIAL_DIRECTION: 'UP',
   GRID_SIZE: 20,
 };
+
+export type EngineEventType = 'FOOD_EATEN' | 'COLLIDED' | 'STATUS_CHANGED' | 'VICTORY';
+
+export interface EngineEvent {
+  type: EngineEventType;
+  payload?: Record<string, unknown>;
+}
